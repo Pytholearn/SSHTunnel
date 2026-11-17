@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,7 +20,9 @@ import (
 	"sshtunnel/internal/links"
 	"sshtunnel/internal/proxy"
 	"sshtunnel/internal/sysproxy"
+	"sshtunnel/internal/tun"
 	"sshtunnel/internal/tunnel"
+	"sshtunnel/internal/udpgw"
 )
 
 const appVersion = "1.0.0"
@@ -149,9 +152,15 @@ func (a *App) startup(ctx context.Context) {
 	}
 	recoverTunRoutes(a.dir, a.logs.Printf)
 	st := a.store.Settings()
-	if st.ConnectOnStart && st.LastSelected != "" && a.store.Profile(st.LastSelected) != nil {
+	target := ""
+	if id := argValue("connect"); id != "" { // relaunched elevated for TUN mode
+		target = id
+	} else if st.ConnectOnStart {
+		target = st.LastSelected
+	}
+	if target != "" && a.store.Profile(target) != nil {
 		go func() {
-			if err := a.Connect(st.LastSelected); err != nil {
+			if err := a.Connect(target); err != nil {
 				a.logs.Printf("connect on start: %v", err)
 			}
 		}()
@@ -535,6 +544,22 @@ func (a *App) Connect(id string) error {
 	a.SelectProfile(id)
 	st := a.store.Settings()
 
+	if st.TunMode && !isAdmin() {
+		return a.relaunchElevated(id)
+	}
+	// TUN: resolve the server and find the physical route before routes change.
+	var (
+		tunIPs   []netip.Addr
+		tunRoute tun.Route
+		tunDial  func(context.Context, string) (net.Conn, error)
+	)
+	if st.TunMode {
+		var err error
+		if tunIPs, tunRoute, tunDial, err = prepareTUN(p); err != nil {
+			return fmt.Errorf("TUN: %w", err)
+		}
+	}
+
 	px := &proxy.Server{Logf: a.logs.Printf, Direct: proxy.NewMatcher(st.BypassList)}
 	socksAddr := "127.0.0.1:" + strconv.Itoa(st.SocksPort)
 	httpAddr := "127.0.0.1:" + strconv.Itoa(st.HTTPPort)
@@ -554,13 +579,17 @@ func (a *App) Connect(id string) error {
 	var tn *tunnel.Tunnel
 	opt.OnState = func(s tunnel.State, detail string) { a.onTunnelState(tn, s, detail) }
 	if st.TunMode {
-		opt.DialServer = physicalDialer()
+		opt.DialServer = tunDial
 	}
 	tn = tunnel.New(opt)
 	px.Dial = tn.Dial
+	relay := a.newRelay(p, tn)
+	resolver := udpgw.TunnelResolver(tn.Dial, "8.8.8.8:53")
+	px.UDP = func(ctx context.Context, pc net.PacketConn) { relay.ServeSOCKS(ctx, pc, resolver) }
 
 	a.mu.Lock()
 	a.tun, a.px, a.activeID = tn, px, id
+	a.extra = sessionExtras{relay: relay}
 	a.state, a.detail = tunnel.StateConnecting, ""
 	a.lastUp, a.lastDown, a.speedUp, a.speedDown = 0, 0, 0, 0
 	a.stopStats = make(chan struct{})
@@ -569,8 +598,34 @@ func (a *App) Connect(id string) error {
 
 	a.logs.Printf("connecting to %s (%s) – SOCKS %s, HTTP %s", p.Name, p.Address(), socksAddr, httpAddr)
 	tn.Start()
-	a.startExtras(p, st, tn, px)
-	if st.SystemProxy {
+	if st.TunMode {
+		eng, err := a.startTUN(tunIPs, tunRoute, tn, relay, st)
+		if err != nil {
+			a.logs.Printf("TUN failed, staying in proxy mode: %v", err)
+		} else {
+			a.mu.Lock()
+			if a.tun == tn {
+				a.extra.engine = eng
+			} else {
+				eng.Stop()
+			}
+			a.mu.Unlock()
+		}
+	}
+	if p.UDPGWPort > 0 {
+		go func() { // open the udpgw channel early so the UI shows UDP status
+			for i := 0; i < 60; i++ {
+				if s, _ := tn.State(); s == tunnel.StateConnected {
+					relay.Warmup()
+					return
+				} else if s == tunnel.StateError || s == tunnel.StateDisconnected && i > 0 {
+					return
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
+		}()
+	}
+	if st.SystemProxy && !a.extra.tunActive() {
 		if err := a.sp.Enable(httpAddr); err != nil {
 			a.logs.Printf("system proxy: %v", err)
 		} else {
@@ -639,6 +694,7 @@ func (a *App) disconnect(log bool) {
 		close(stop)
 	}
 	extra.stop(a.logs.Printf)
+	clearPhys()
 	if ok, err := a.sp.Restore(); err != nil {
 		a.logs.Printf("restore system proxy: %v", err)
 	} else if ok {

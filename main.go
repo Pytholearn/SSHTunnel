@@ -15,6 +15,7 @@ import (
 var assets embed.FS
 
 func main() {
+	waitForParent()
 	app, err := NewApp()
 	if err != nil {
 		log.Fatal(err)

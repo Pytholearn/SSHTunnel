@@ -18,6 +18,12 @@
 - رمزها با DPAPI ویندوز رمزنگاری می‌شوند و هیچ‌وقت در لاگ نوشته نمی‌شوند.
 - آیکون کنار ساعت (اتصال/قطع/نمایش/خروج)، فقط یک نسخه از برنامه، اتصال خودکار هنگام اجرا، اجرا همراه ویندوز.
 - رابط فارسی راست‌به‌چپ با گزینهٔ انگلیسی، تم تیره/روشن.
+- **UDP** (تماس، بازی) از طریق badvpn-udpgw سرور (پورت `udpgwPort`، معمولاً 7300)؛ در SOCKS5 با UDP ASSOCIATE.
+- **اشتراک (Subscription):** لینک `https://…` را بچسبانید یا از دکمهٔ «اشتراک‌ها» اضافه کنید؛ «به‌روزرسانی»
+  کانفیگ‌های همان اشتراک را جایگزین می‌کند و حجم مصرفی/کل/انقضا نمایش داده می‌شود.
+- **حالت TUN** (همهٔ برنامه‌ها، حتی آن‌هایی که پروکسی را نادیده می‌گیرند): در تنظیمات روشن کنید؛ برنامه یک بار
+  با دسترسی ادمین دوباره اجرا می‌شود. DNS از طریق udpgw یا TCP داخل تونل می‌رود.
+- **فهرست مستقیم:** دامنه/IP‌هایی مثل `*.ir` یا `192.168.0.0/16` که نباید از تونل بروند.
 
 ### استفاده
 1. `SSHTunnel.exe` را اجرا کنید (WebView2 روی ویندوز ۱۰/۱۱ هست؛ اگر نبود: https://developer.microsoft.com/microsoft-edge/webview2/).
@@ -75,6 +81,27 @@ Parsing tolerates surrounding whitespace, missing padding, URL-safe base64, and 
   (`--minimized` → starts in tray), Persian RTL / English, dark / light.
 - Passwords are DPAPI-encrypted in `%APPDATA%\SSHTunnel\config.json`, never logged.
 
+#### Phase 2
+
+- **UDP via udpgw.** One direct-tcpip channel to `127.0.0.1:<udpgwPort>` carries all UDP flows using the
+  badvpn-udpgw protocol (layout checked against badvpn's `udpgw_proto.h` / `udpgw.c`; unit test with known
+  bytes, integration test against a real `badvpn-udpgw`). Keepalive every 10 s, REBIND on new conids, LRU
+  conid reuse, DNS flag when `udpgwTransparentDNS` is set. Exposed as SOCKS5 UDP ASSOCIATE. DNS falls back
+  to DNS-over-TCP through the tunnel when the server has no udpgw.
+- **Subscriptions.** `https://…` lines in a paste or the Subscriptions dialog. Fetched with `ssh=uri` added to
+  the query and a Hiddify-like User-Agent; only SSH links are imported. Update replaces that subscription's
+  configs. `Subscription-Userinfo` (used/total/expire) and `Profile-Title` are shown. When connected the fetch
+  goes through the tunnel first, then direct.
+- **TUN mode.** Wintun adapter (`wintun.dll` 0.14.1, signed by WireGuard LLC, embedded and extracted next to the
+  exe) + tun2socks' gVisor stack, with our own transport handler: TCP goes straight into the SSH dialer, UDP
+  into udpgw (no local SOCKS hop). Routes `0.0.0.0/1`, `128.0.0.0/1` (and IPv6 halves) into the adapter; the SSH
+  server IP gets a host route via the real gateway and the SSH socket is pinned to the physical interface
+  (`IP_UNICAST_IF`), so there is no loop. Adapter DNS = 8.8.8.8 / 1.1.1.1. Needs admin: when TUN is enabled the
+  app relaunches itself elevated (`--wait-pid`, `--connect`). Host routes are recorded in
+  `%APPDATA%\SSHTunnel	un-routes.json` and removed on the next start after a crash.
+- **Direct (bypass) list.** Domains (`example.com`, `*.ir`) and IP/CIDR ranges that skip the tunnel in proxy
+  mode (and IPs in TUN mode).
+
 ### Build
 
 Requirements: Go 1.23+, Wails CLI v2 (`go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2`).
@@ -117,6 +144,10 @@ $env:SSHT_SYSPROXY='1'   # also flips the real system proxy for a moment and che
 go test -tags integration -v ./integration
 ```
 
+For the UDP test, run `badvpn-udpgw --listen-addr 127.0.0.1:7300` and a UDP echo server on `127.0.0.1:9999`
+on the server side (`TestUDPGW`). `TUN_TEST_ADDR=<WSL-IP>:2222 go test ./internal/tun` checks the
+interface-pinned dialer.
+
 ### Layout
 
 ```
@@ -126,5 +157,9 @@ internal/config              profiles/settings store, DPAPI
 internal/tunnel              SSH connection, keepalive, reconnect, host keys
 internal/proxy               SOCKS5 + HTTP proxy, bypass rules
 internal/sysproxy            WinINet system proxy set/restore
+internal/udpgw               badvpn-udpgw client, SOCKS5 UDP relay, DNS-over-TCP fallback
+internal/subs                subscription fetch / Subscription-Userinfo
+internal/tun                 Wintun + gVisor TUN engine, routes, interface-pinned dialer
+assets/wintun                wintun.dll (amd64) + its license
 frontend/dist                UI (HTML/CSS/JS, Vazirmatn font, OFL)
 ```

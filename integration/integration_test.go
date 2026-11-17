@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/exec"
@@ -19,12 +20,14 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/net/dns/dnsmessage"
 	xproxy "golang.org/x/net/proxy"
 
 	"sshtunnel/internal/links"
 	"sshtunnel/internal/proxy"
 	"sshtunnel/internal/sysproxy"
 	"sshtunnel/internal/tunnel"
+	"sshtunnel/internal/udpgw"
 )
 
 func env(k, def string) string {
@@ -205,4 +208,103 @@ func TestSystemProxyRestore(t *testing.T) {
 	if after2, _ := sysproxy.Read(); after2 != before {
 		t.Fatalf("crash recovery mismatch: %+v", after2)
 	}
+}
+
+// TestUDPGW sends UDP through a real badvpn-udpgw on the server
+// (127.0.0.1:7300): an echo server and a DNS query with the DNS flag.
+func TestUDPGW(t *testing.T) {
+	addr := env("SSHT_ADDR", "127.0.0.1:2222")
+	pass := os.Getenv("SSHT_PASS")
+	echo := env("SSHT_UDP_ECHO", "127.0.0.1:9999")
+	if pass == "" {
+		t.Skip("SSHT_PASS not set")
+	}
+	tn := tunnel.New(tunnel.Options{Addr: addr, User: env("SSHT_USER", "tunneltest"), Password: pass})
+	tn.Start()
+	defer tn.Stop()
+	waitState(t, tn, tunnel.StateConnected, 15*time.Second)
+
+	relay := &udpgw.Relay{Dial: tn.Dial, Port: 7300, TransparentDNS: true,
+		Logf: func(f string, a ...any) { t.Logf("udpgw: "+f, a...) }}
+	defer relay.Close()
+
+	// 1) plain UDP echo via the relay
+	got := make(chan string, 1)
+	f := relay.NewFlow(netip.MustParseAddrPort(echo), func(_ netip.AddrPort, p []byte) { got <- string(p) })
+	if err := f.Send([]byte("hi")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case s := <-got:
+		if s != "echo:hi" {
+			t.Fatalf("echo got %q", s)
+		}
+		t.Logf("udp echo through udpgw: %q", s)
+	case <-time.After(5 * time.Second):
+		t.Fatal("no udp echo reply")
+	}
+
+	// 2) DNS with the DNS flag (server uses its own resolver)
+	q := dnsQuery(t, 0x4242, "example.com.")
+	dnsGot := make(chan []byte, 1)
+	df := relay.NewFlow(netip.MustParseAddrPort("8.8.8.8:53"), func(_ netip.AddrPort, p []byte) { dnsGot <- p })
+	if err := df.Send(q); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case p := <-dnsGot:
+		var m dnsmessage.Message
+		if err := m.Unpack(p); err != nil || m.ID != 0x4242 {
+			t.Fatalf("bad dns reply: %v id=%x", err, m.ID)
+		}
+		t.Logf("dns via udpgw: rcode=%v answers=%d", m.RCode, len(m.Answers))
+	case <-time.After(8 * time.Second):
+		t.Fatal("no dns reply")
+	}
+
+	// 3) SOCKS5 UDP ASSOCIATE end to end
+	px := &proxy.Server{Dial: tn.Dial, UDP: func(ctx context.Context, pc net.PacketConn) { relay.ServeSOCKS(ctx, pc, nil) }}
+	if err := px.ListenSOCKS("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	defer px.Close()
+	c, err := net.Dial("tcp", px.Addrs()[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Write([]byte{5, 1, 0})
+	io.ReadFull(c, make([]byte, 2))
+	c.Write([]byte{5, 3, 0, 1, 0, 0, 0, 0, 0, 0})
+	hdr := make([]byte, 3)
+	io.ReadFull(c, hdr)
+	bind, err := proxy.ReadSOCKSAddr(c)
+	if err != nil || hdr[1] != 0 {
+		t.Fatalf("associate: %v rep=%d", err, hdr[1])
+	}
+	u, _ := net.Dial("udp", bind)
+	defer u.Close()
+	pkt, _ := proxy.AppendSOCKSAddr([]byte{0, 0, 0}, echo)
+	u.Write(append(pkt, "socks"...))
+	u.SetReadDeadline(time.Now().Add(5 * time.Second))
+	buf := make([]byte, 1500)
+	n, err := u.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(string(buf[:n]), "echo:socks") {
+		t.Fatalf("socks udp got %q", buf[:n])
+	}
+	t.Log("SOCKS5 UDP ASSOCIATE through udpgw OK")
+}
+
+func dnsQuery(t *testing.T, id uint16, name string) []byte {
+	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, RecursionDesired: true})
+	b.StartQuestions()
+	b.Question(dnsmessage.Question{Name: dnsmessage.MustNewName(name), Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET})
+	out, err := b.Finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }

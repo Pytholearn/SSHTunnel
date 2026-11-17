@@ -321,10 +321,11 @@ $("#formSettings").addEventListener("submit", async (e) => {
   };
   try {
     await api.SaveSettings(s);
+    const tunTurnedOn = s.tunMode && !S.settings.tunMode;
     S.settings = s;
     $("#dlgSettings").close();
     renderStatus();
-    toast(t("saved"));
+    toast(tunTurnedOn && !S.isAdmin ? t("tunNeedsAdmin") : t("saved"));
   } catch (err) { $("#settingsError").textContent = String(err); }
 });
 
@@ -419,6 +420,7 @@ on("log", appendLog);
   S.settings = snap.settings;
   S.status = snap.status;
   S.selected = snap.settings.lastSelected || "";
+  S.isAdmin = !!snap.isAdmin;
   lang = snap.settings.language === "en" ? "en" : "fa";
   logsEl.textContent = (snap.logs || []).join("\n");
   logsEl.scrollTop = logsEl.scrollHeight;
