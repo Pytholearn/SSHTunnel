@@ -98,7 +98,7 @@ Parsing tolerates surrounding whitespace, missing padding, URL-safe base64, and 
   server IP gets a host route via the real gateway and the SSH socket is pinned to the physical interface
   (`IP_UNICAST_IF`), so there is no loop. Adapter DNS = 8.8.8.8 / 1.1.1.1. Needs admin: when TUN is enabled the
   app relaunches itself elevated (`--wait-pid`, `--connect`). Host routes are recorded in
-  `%APPDATA%\SSHTunnel	un-routes.json` and removed on the next start after a crash.
+  `%APPDATA%\SSHTunnel\tun-routes.json` and removed on the next start after a crash.
 - **Direct (bypass) list.** Domains (`example.com`, `*.ir`) and IP/CIDR ranges that skip the tunnel in proxy
   mode (and IPs in TUN mode).
 
