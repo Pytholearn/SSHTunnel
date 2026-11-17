@@ -142,7 +142,20 @@ func NewApp() (*App, error) {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	a.logs.SetSink(func(line string) { runtime.EventsEmit(ctx, "log", line) })
+	logFile, _ := os.Create(filepath.Join(a.dir, "app.log")) // last session's log, for support
+	a.logs.SetSink(func(line string) {
+		runtime.EventsEmit(ctx, "log", line)
+		if logFile != nil {
+			_, _ = logFile.WriteString(line + string([]byte{13, 10}))
+		}
+	})
+	if v, err := strconv.Atoi(argValue("quit-after")); err == nil && v > 0 { // used by automated tests
+		go func() {
+			time.Sleep(time.Duration(v) * time.Second)
+			a.logs.Printf("quit-after %ds reached, exiting", v)
+			a.Quit()
+		}()
+	}
 	a.logs.Printf("SSHTunnel %s started", appVersion)
 	// Crash recovery: a backup left behind means the last run did not restore.
 	if ok, err := a.sp.Restore(); err != nil {
@@ -596,7 +609,7 @@ func (a *App) Connect(id string) error {
 	stop := a.stopStats
 	a.mu.Unlock()
 
-	a.logs.Printf("connecting to %s (%s) – SOCKS %s, HTTP %s", p.Name, p.Address(), socksAddr, httpAddr)
+	a.logs.Printf("connecting to %s (%s) - SOCKS %s, HTTP %s", p.Name, p.Address(), socksAddr, httpAddr)
 	tn.Start()
 	if st.TunMode {
 		eng, err := a.startTUN(tunIPs, tunRoute, tn, relay, st)

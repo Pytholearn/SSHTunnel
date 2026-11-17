@@ -158,6 +158,9 @@ func (a *App) relaunchElevated(id string) error {
 		return err
 	}
 	args := fmt.Sprintf("--wait-pid=%d --connect=%s", os.Getpid(), id)
+	if q := argValue("quit-after"); q != "" {
+		args += " --quit-after=" + q
+	}
 	verb, _ := windows.UTF16PtrFromString("runas")
 	file, _ := windows.UTF16PtrFromString(exe)
 	params, _ := windows.UTF16PtrFromString(args)
