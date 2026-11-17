@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="fa" dir="rtl" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SSH Tunnel</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="icon.png" alt="" width="26" height="26">
+      <span>SSH Tunnel</span>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="btnPaste" data-i18n-title="pasteHint"><span data-i18n="paste">Paste</span><kbd>Ctrl+V</kbd></button>
+      <button class="btn" id="btnAdd" data-i18n="add">Add</button>
+      <button class="btn" id="btnSubs" data-i18n="subscriptions">Subscriptions</button>
+      <button class="btn" id="btnTestAll" data-i18n="testAll">Test all</button>
+      <button class="btn" id="btnSort" data-i18n="sort">Sort</button>
+      <span class="sep"></span>
+      <button class="btn icon" id="btnSettings" data-i18n-title="settings" aria-label="settings">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.7 7.7 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.7 7.7 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.7 7.7 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.7 7.7 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>
+      </button>
+      <button class="btn icon" id="btnTheme" data-i18n-title="theme" aria-label="theme">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9c0-.5 0-1-.1-1.4A5.5 5.5 0 0 1 13.4 3.1 9 9 0 0 0 12 3z"/></svg>
+      </button>
+      <button class="btn icon lang" id="btnLang">EN</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="list-pane">
+      <div class="pane-head">
+        <h2 data-i18n="configs">Configs</h2>
+        <span class="count" id="count">0</span>
+      </div>
+      <div id="list" class="list" role="listbox"></div>
+      <div id="empty" class="empty hidden">
+        <p data-i18n="emptyTitle">No configs yet</p>
+        <p class="muted" data-i18n="emptyHint">Copy a link and press Ctrl+V</p>
+      </div>
+    </section>
+
+    <section class="status-pane">
+      <div class="state-line"><span class="dot" id="dot"></span><span id="stateText"></span></div>
+      <div class="profile-name" id="profileName">—</div>
+      <button class="connect" id="btnConnect">
+        <svg viewBox="0 0 24 24" width="38" height="38"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M12 3v8M7.1 6.3a7.5 7.5 0 1 0 9.8 0"/></svg>
+        <span id="connectLabel"></span>
+      </button>
+      <div class="detail" id="detail"></div>
+      <div class="stats">
+        <div class="stat"><label data-i18n="uptime">Uptime</label><b id="uptime">—</b></div>
+        <div class="stat"><label data-i18n="latency">Latency</label><b id="latency">—</b></div>
+        <div class="stat"><label>↑ <span data-i18n="upload">Upload</span></label><b id="up">—</b><small id="upSpeed"></small></div>
+        <div class="stat"><label>↓ <span data-i18n="download">Download</span></label><b id="down">—</b><small id="downSpeed"></small></div>
+      </div>
+      <div class="toggles">
+        <label class="switch"><input type="checkbox" id="swSysProxy"><span></span><em data-i18n="systemProxy">System proxy</em></label>
+      </div>
+      <div class="addrs" id="addrs"></div>
+    </section>
+  </main>
+
+  <section class="logs" id="logsPane">
+    <div class="logs-head">
+      <button class="linkbtn" id="btnLogsToggle"><span data-i18n="logs">Logs</span> <span id="logsArrow">▾</span></button>
+      <div>
+        <button class="btn small" id="btnCopyLogs" data-i18n="copyLogs">Copy logs</button>
+      </div>
+    </div>
+    <pre id="logs" dir="ltr"></pre>
+  </section>
+
+  <!-- edit dialog -->
+  <dialog id="dlgEdit">
+    <form method="dialog" id="formEdit">
+      <h3 id="editTitle"></h3>
+      <label><span data-i18n="fName">Name</span><input name="name"></label>
+      <div class="row">
+        <label class="grow"><span data-i18n="fHost">Host</span><input name="host" dir="ltr" required></label>
+        <label class="port"><span data-i18n="fPort">Port</span><input name="port" type="number" min="1" max="65535" dir="ltr" required value="22"></label>
+      </div>
+      <div class="row">
+        <label class="grow"><span data-i18n="fUser">Username</span><input name="username" dir="ltr" required autocomplete="off"></label>
+        <label class="grow"><span data-i18n="fPass">Password</span><input name="password" type="password" dir="ltr" autocomplete="new-password"></label>
+      </div>
+      <div class="row">
+        <label class="port"><span data-i18n="fUdpgw">UDPGW port</span><input name="udpgwPort" type="number" min="0" max="65535" dir="ltr" value="7300"></label>
+        <label class="grow"><span data-i18n="fHostKey">Host key (optional)</span><input name="hostKey" dir="ltr" placeholder="ssh-ed25519 AAAA…"></label>
+      </div>
+      <details>
+        <summary data-i18n="fKeyAuth">Private key (optional)</summary>
+        <textarea name="privateKey" rows="4" dir="ltr" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
+      </details>
+      <p class="form-error" id="editError"></p>
+      <div class="dlg-actions">
+        <button type="button" class="btn ghost" id="btnForgetKey" data-i18n="forgetKey">Forget saved key</button>
+        <span class="grow"></span>
+        <button value="cancel" class="btn" formnovalidate data-i18n="cancel">Cancel</button>
+        <button value="ok" class="btn primary" data-i18n="save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- settings dialog -->
+  <dialog id="dlgSettings">
+    <form method="dialog" id="formSettings">
+      <h3 data-i18n="settings">Settings</h3>
+      <div class="row">
+        <label class="grow"><span data-i18n="socksPort">SOCKS5 port</span><input name="socksPort" type="number" min="1" max="65535" dir="ltr"></label>
+        <label class="grow"><span data-i18n="httpPort">HTTP port</span><input name="httpPort" type="number" min="1" max="65535" dir="ltr"></label>
+      </div>
+      <label class="check"><input type="checkbox" name="systemProxy"><span data-i18n="systemProxyOnConnect">Set system proxy when connected</span></label>
+      <label class="check"><input type="checkbox" name="connectOnStart"><span data-i18n="connectOnStart">Connect on start</span></label>
+      <label class="check"><input type="checkbox" name="startWithWindows"><span data-i18n="startWithWindows">Start with Windows</span></label>
+      <label class="check"><input type="checkbox" name="tunMode"><span data-i18n="tunMode">TUN mode (all apps, needs admin)</span></label>
+      <label><span data-i18n="bypass">Direct (bypass) list — one per line</span>
+        <textarea name="bypassList" rows="5" dir="ltr" placeholder="*.ir&#10;192.168.0.0/16"></textarea></label>
+      <p class="muted small" data-i18n="portsNote">Port and TUN changes apply on next connect.</p>
+      <p class="form-error" id="settingsError"></p>
+      <div class="dlg-actions">
+        <span class="grow"></span>
+        <button value="cancel" class="btn" formnovalidate data-i18n="cancel">Cancel</button>
+        <button value="ok" class="btn primary" data-i18n="save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- subscriptions dialog -->
+  <dialog id="dlgSubs">
+    <form method="dialog" id="formSubs">
+      <h3 data-i18n="subscriptions">Subscriptions</h3>
+      <div id="subsList" class="subs"></div>
+      <div class="row">
+        <input name="url" class="grow" dir="ltr" placeholder="https://…">
+        <button type="button" class="btn primary" id="btnSubAdd" data-i18n="addSub">Add</button>
+      </div>
+      <p class="form-error" id="subsError"></p>
+      <div class="dlg-actions">
+        <span class="grow"></span>
+        <button value="cancel" class="btn" data-i18n="close">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>
