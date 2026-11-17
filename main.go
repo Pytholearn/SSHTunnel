@@ -1,3 +1,4 @@
+// SSH Tunnel - Windows SSH tunnel VPN client. Made By Hazard. MIT License.
 package main
 
 import (

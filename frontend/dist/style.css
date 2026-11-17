@@ -136,6 +136,7 @@ kbd { font: 11px/1 Consolas, monospace; padding: 3px 5px; border-radius: 4px; ba
 .stat small { color: var(--muted); font-size: 11px; direction: ltr; unicode-bidi: plaintext; text-align: start; min-height: 16px; }
 .toggles { width: 100%; }
 .addrs { font: 12px Consolas, monospace; color: var(--muted); direction: ltr; text-align: center; }
+.credit { font-size: 11px; font-weight: 500; color: var(--muted); border: 1px solid var(--line); border-radius: 99px; padding: 1px 8px; direction: ltr; }
 
 .switch { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .switch input { display: none; }

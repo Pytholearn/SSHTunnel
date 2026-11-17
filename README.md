@@ -1,4 +1,20 @@
-# SSH Tunnel — Windows client
+<p align="center"><img src="build/appicon.png" width="96" alt="SSH Tunnel"></p>
+
+<h1 align="center">SSH Tunnel — Windows client</h1>
+
+<p align="center">
+  <b>Made By Hazard</b><br>
+  Copy a link · press <kbd>Ctrl</kbd>+<kbd>V</kbd> · Connect
+</p>
+
+<p align="center">
+  <a href="../../releases/latest"><img alt="Download" src="https://img.shields.io/badge/download-SSHTunnel.exe-2563eb?style=for-the-badge&logo=windows"></a>
+  <img alt="Windows 10/11 x64" src="https://img.shields.io/badge/Windows-10%20%7C%2011%20x64-0f172a?style=for-the-badge">
+  <img alt="Go + Wails" src="https://img.shields.io/badge/Go%20%2B%20Wails-v2-00add8?style=for-the-badge&logo=go">
+  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge"></a>
+</p>
+
+<p align="center"><img src="docs/screenshot.png" width="720" alt="SSH Tunnel screenshot"></p>
 
 <div dir="rtl">
 
@@ -25,6 +41,9 @@
   با دسترسی ادمین دوباره اجرا می‌شود. DNS از طریق udpgw یا TCP داخل تونل می‌رود.
 - **فهرست مستقیم:** دامنه/IP‌هایی مثل `*.ir` یا `192.168.0.0/16` که نباید از تونل بروند.
 
+### دانلود
+آخرین نسخهٔ `SSHTunnel.exe` را از بخش [Releases](../../releases/latest) بگیرید. نصب لازم ندارد.
+
 ### استفاده
 1. `SSHTunnel.exe` را اجرا کنید (WebView2 روی ویندوز ۱۰/۱۱ هست؛ اگر نبود: https://developer.microsoft.com/microsoft-edge/webview2/).
 2. لینک را کپی کنید و داخل برنامه Ctrl+V بزنید.
@@ -46,6 +65,8 @@ curl -x socks5h://127.0.0.1:10808 https://ifconfig.me
 </div>
 
 ## English
+
+**Download:** grab `SSHTunnel.exe` from [Releases](../../releases/latest) — no installer needed.
 
 A small single-exe Windows 10/11 x64 app, like v2rayN but for SSH tunnels. Copy a config link, press **Ctrl+V**
 in the window (or the Paste button), select the config and press Connect.
@@ -163,3 +184,14 @@ internal/tun                 Wintun + gVisor TUN engine, routes, interface-pinne
 assets/wintun                wintun.dll (amd64) + its license
 frontend/dist                UI (HTML/CSS/JS, Vazirmatn font, OFL)
 ```
+
+### Credits & license
+
+- **Made By Hazard** — released under the [MIT License](LICENSE).
+- [Wails](https://wails.io), [golang.org/x/crypto/ssh](https://pkg.go.dev/golang.org/x/crypto/ssh),
+  [tun2socks](https://github.com/xjasonlyu/tun2socks) / [gVisor](https://gvisor.dev) (TUN stack),
+  [Wintun](https://www.wintun.net) (driver DLL, see `assets/wintun/LICENSE.txt`),
+  [badvpn](https://github.com/ambrop72/badvpn) (udpgw protocol),
+  [Vazirmatn](https://github.com/rastikerdar/vazirmatn) font (SIL OFL, `frontend/dist/fonts/OFL.txt`).
+
+<p align="center"><sub>Made By Hazard</sub></p>

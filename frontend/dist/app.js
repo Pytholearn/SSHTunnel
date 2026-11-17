@@ -426,6 +426,8 @@ on("log", appendLog);
   logsEl.scrollTop = logsEl.scrollHeight;
   applyTheme();
   applyLang();
+  // Browser preview only (mock backend): #demo shows a connected session.
+  if (!window.go && location.hash === "#demo" && S.profiles[0]) { select(S.profiles[0].id); connect(S.profiles[0].id); }
 })();
 
 // ---------- mock backend for previewing the UI in a plain browser ----------
