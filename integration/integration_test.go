@@ -7,6 +7,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 	xproxy "golang.org/x/net/proxy"
 
+	"sshtunnel/internal/config"
 	"sshtunnel/internal/links"
 	"sshtunnel/internal/proxy"
 	"sshtunnel/internal/sysproxy"
@@ -73,17 +75,29 @@ func shell(t *testing.T, cmdline string) {
 	}
 }
 
-func TestOpenSSH(t *testing.T) {
+// linkFromEnv returns the profile under test: SSHT_LINK_FILE (any supported
+// link, e.g. a real npvt-ssh:// export) or a ssh:// link built from SSHT_*.
+func linkFromEnv(t *testing.T) *config.Profile {
+	t.Helper()
+	if f := os.Getenv("SSHT_LINK_FILE"); f != "" {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := links.Parse(strings.TrimSpace(string(b)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("profile %q %s user=%s udpgw=%d (password not logged)", p.Name, p.Address(), p.Username, p.UDPGWPort)
+		return p
+	}
 	addr := env("SSHT_ADDR", "127.0.0.1:2222")
 	user, pass := env("SSHT_USER", "tunneltest"), os.Getenv("SSHT_PASS")
 	hk := os.Getenv("SSHT_HK")
-	target := env("SSHT_TARGET", "http://127.0.0.1:8088/") // URL reachable from the server side
 	if pass == "" {
-		t.Skip("SSHT_PASS not set")
+		t.Skip("SSHT_PASS / SSHT_LINK_FILE not set")
 	}
 	host, port, _ := net.SplitHostPort(addr)
-
-	// Build a real link and import it the way the app does.
 	link := fmt.Sprintf("ssh://%s:%s@%s:%s/?hk=%s#%s", url.PathEscape(user), url.QueryEscape(pass), host, port,
 		url.QueryEscape(hk), url.PathEscape("integration | test"))
 	p, err := links.Parse(link)
@@ -93,6 +107,12 @@ func TestOpenSSH(t *testing.T) {
 	if p.PinnedHostKey != hk || p.Password != pass {
 		t.Fatalf("link round trip failed: %+v", p)
 	}
+	return p
+}
+
+func TestOpenSSH(t *testing.T) {
+	p := linkFromEnv(t)
+	target := env("SSHT_TARGET", "http://127.0.0.1:8088/") // URL reachable from the server side
 
 	pol := tunnel.HostKeyPolicy{Pinned: p.PinnedHostKey}
 	lat, err := tunnel.TestLatency(context.Background(), tunnel.Options{Addr: p.Address(), User: p.Username, Password: p.Password,
@@ -213,35 +233,36 @@ func TestSystemProxyRestore(t *testing.T) {
 // TestUDPGW sends UDP through a real badvpn-udpgw on the server
 // (127.0.0.1:7300): an echo server and a DNS query with the DNS flag.
 func TestUDPGW(t *testing.T) {
-	addr := env("SSHT_ADDR", "127.0.0.1:2222")
-	pass := os.Getenv("SSHT_PASS")
-	echo := env("SSHT_UDP_ECHO", "127.0.0.1:9999")
-	if pass == "" {
-		t.Skip("SSHT_PASS not set")
+	p := linkFromEnv(t)
+	echo := env("SSHT_UDP_ECHO", "127.0.0.1:9999") // "none" = server has no echo service
+	if p.UDPGWPort == 0 {
+		p.UDPGWPort = 7300
 	}
-	tn := tunnel.New(tunnel.Options{Addr: addr, User: env("SSHT_USER", "tunneltest"), Password: pass})
+	tn := tunnel.New(tunnel.Options{Addr: p.Address(), User: p.Username, Password: p.Password})
 	tn.Start()
 	defer tn.Stop()
 	waitState(t, tn, tunnel.StateConnected, 15*time.Second)
 
-	relay := &udpgw.Relay{Dial: tn.Dial, Port: 7300, TransparentDNS: true,
+	relay := &udpgw.Relay{Dial: tn.Dial, Port: p.UDPGWPort, TransparentDNS: true,
 		Logf: func(f string, a ...any) { t.Logf("udpgw: "+f, a...) }}
 	defer relay.Close()
 
 	// 1) plain UDP echo via the relay
-	got := make(chan string, 1)
-	f := relay.NewFlow(netip.MustParseAddrPort(echo), func(_ netip.AddrPort, p []byte) { got <- string(p) })
-	if err := f.Send([]byte("hi")); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case s := <-got:
-		if s != "echo:hi" {
-			t.Fatalf("echo got %q", s)
+	if echo != "none" {
+		got := make(chan string, 1)
+		f := relay.NewFlow(netip.MustParseAddrPort(echo), func(_ netip.AddrPort, p []byte) { got <- string(p) })
+		if err := f.Send([]byte("hi")); err != nil {
+			t.Fatal(err)
 		}
-		t.Logf("udp echo through udpgw: %q", s)
-	case <-time.After(5 * time.Second):
-		t.Fatal("no udp echo reply")
+		select {
+		case s := <-got:
+			if s != "echo:hi" {
+				t.Fatalf("echo got %q", s)
+			}
+			t.Logf("udp echo through udpgw: %q", s)
+		case <-time.After(5 * time.Second):
+			t.Fatal("no udp echo reply")
+		}
 	}
 
 	// 2) DNS with the DNS flag (server uses its own resolver)
@@ -284,16 +305,28 @@ func TestUDPGW(t *testing.T) {
 	}
 	u, _ := net.Dial("udp", bind)
 	defer u.Close()
-	pkt, _ := proxy.AppendSOCKSAddr([]byte{0, 0, 0}, echo)
-	u.Write(append(pkt, "socks"...))
-	u.SetReadDeadline(time.Now().Add(5 * time.Second))
+	dst, payload, want := echo, []byte("socks"), "echo:socks"
+	if echo == "none" {
+		dst, payload, want = "1.1.1.1:53", dnsQuery(t, 0x5151, "cloudflare.com."), ""
+	}
+	pkt, _ := proxy.AppendSOCKSAddr([]byte{0, 0, 0}, dst)
+	u.Write(append(pkt, payload...))
+	u.SetReadDeadline(time.Now().Add(8 * time.Second))
 	buf := make([]byte, 1500)
 	n, err := u.Read(buf)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(string(buf[:n]), "echo:socks") {
+	if want != "" && !strings.HasSuffix(string(buf[:n]), want) {
 		t.Fatalf("socks udp got %q", buf[:n])
+	}
+	if want == "" {
+		rd := bytes.NewReader(buf[3:n])
+		proxy.ReadSOCKSAddr(rd)
+		var m dnsmessage.Message
+		if err := m.Unpack(buf[n-rd.Len() : n]); err != nil || m.ID != 0x5151 {
+			t.Fatalf("socks udp dns reply: %v", err)
+		}
 	}
 	t.Log("SOCKS5 UDP ASSOCIATE through udpgw OK")
 }
